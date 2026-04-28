@@ -28,7 +28,6 @@ read -p "Enter target leaderboard channel ID: " CHANNELID
 read -p "Enter leaderboard emoji name: " EMOJINAME
 read -p "Enter leaderboard emoji ID: " EMOJIID
 read -p "Enter gamemode for Bot: " GAMEMODE
-read -p "Show retired players (true/false) " BOOL
 
 if [["$BOOL" != "true" && "$BOOL" != "false" ]]; then
     echo "Invalid input."
@@ -110,8 +109,7 @@ tee "$INSTALL_DIR/config.json" >/dev/null <<EOF
   "LEADERBOARD_EMOJI_NAME": "$EMOJINAME",
   "LEADERBOARD_EMOJI_ID": $EMOJIID,
   "GAMEMODE": "$GAMEMODE",
-  "TIER_UNRANKED": "Unranked",
-  "SHOW_RETIRED_PLAYERS": $BOOL
+  "TIER_UNRANKED": "Unranked"
 }
 EOF
 
