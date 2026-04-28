@@ -61,7 +61,29 @@ mv ztt-leaderboard-bot/*.py $INSTALL_DIR
 mv ztt-leaderboard-bot/cogs/ $INSTALL_DIR
 
 echo "Installing systemd service file from repository..."
-mv ztt-lb.service "$SERVICE_FILE"
+tee "$SERVICE_FILE" >/dev/null <<EOF
+[Unit]
+Description=Zeqa Tier Testing Leaderboard Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/opt/ztt-leaderboard-bot-$GAMEMODE/
+EnvironmentFile=/etc/ztt-leaderboard-bot-$GAMEMODE/env
+ExecStart=/opt/ztt-bot/.venv/bin/python main.py
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+StartLimitIntervalSec=120
+StartLimitBurst=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 rm -rf ztt-leaderboard-bot/
 
@@ -77,7 +99,7 @@ bash -c "source $INSTALL_DIR/.venv/bin/activate && \
 echo "Creating environment directory and env file..."
 mkdir -p "$ENV_DIR"
 tee "$ENV_DIR/env" >/dev/null <<EOF
-DATABASE_URL=postgresql://ztt-bot:$DB_PASS@127.0.0.1:5432/ztt
+DATABASE_URL=postgresql://zttbot:$DB_PASS@127.0.0.1:5432/ztt
 BOT_TOKEN=$TOKEN
 EOF
 
@@ -91,7 +113,7 @@ tee "$INSTALL_DIR/config.json" >/dev/null <<EOF
   "TIER_UNRANKED": "Unranked",
   "SHOW_RETIRED_PLAYERS": $BOOL
 }
-
+EOF
 
 echo "Setting permissions on application directory and env file..."
 chown -R "botuser:botuser" "$INSTALL_DIR"

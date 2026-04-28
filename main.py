@@ -1,57 +1,67 @@
 import asyncio
 import json
+import logging
 import os
+from logging.handlers import RotatingFileHandler
 
 import discord
 from discord.ext import commands
 
-import db
-from cogs.leaderboard import LeaderboardCog
+from db import init_pool
 
 
-def load_config(path: str = "config.json") -> dict:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+def _setup_logging() -> None:
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+
+    os.makedirs("logs", exist_ok=True)
+    file_handler = RotatingFileHandler(
+        "logs/bot.log",
+        maxBytes=5 * 1024 * 1024,
+        backupCount=7,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(fmt)
+
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(console)
+    root.addHandler(file_handler)
+
+    logging.getLogger("discord.gateway").setLevel(logging.WARNING)
+    logging.getLogger("discord.http").setLevel(logging.WARNING)
+    logging.getLogger("discord.client").setLevel(logging.WARNING)
 
 
-async def main():
-    config = load_config()
+_setup_logging()
+log = logging.getLogger(__name__)
 
-    token = os.getenv("BOT_TOKEN")
-    database_url = os.getenv("DATABASE_URL")
-
-    if not token:
-        raise RuntimeError("BOT_TOKEN environment variable is not set.")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL environment variable is not set.")
-
-    intents = discord.Intents.default()
-    # We don't strictly need privileged intents for this use case.
-    bot = commands.Bot(command_prefix="!", intents=intents)
-
-    # Attach config to bot for easy access in cogs
-    bot.config = config  # type: ignore[attr-defined]
-
-    # Initialize DB pool
-    await db.init_db(database_url, config["GAMEMODE"], config["TIER_UNRANKED"])
-
-    @bot.event
-    async def on_ready():
-        print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-        print("------")
-
-        # Sync commands to the configured guild
-        guild_id = config["GUILD_ID"]
-        guild = discord.Object(id=guild_id)
-        bot.tree.copy_global_to(guild=guild)
-        await bot.tree.sync(guild=guild)
-        print(f"Synced commands to guild {guild_id}")
-
-    # Add leaderboard cog
-    await bot.add_cog(LeaderboardCog(bot))
-
-    await bot.start(token)
+with open("config.json") as _f:
+    _cfg = json.load(_f)
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+class Bot(commands.Bot):
+    def __init__(self) -> None:
+        super().__init__(
+            command_prefix=commands.when_mentioned,
+            intents=discord.Intents.default(),
+        )
+
+    async def setup_hook(self) -> None:
+        await init_pool()
+        await self.load_extension("cogs.leaderboard")
+        # Guild-scoped sync so the slash command appears instantly.
+        await self.tree.sync(guild=discord.Object(id=_cfg["GUILD_ID"]))
+
+    async def on_ready(self) -> None:
+        print(f"Logged in as {self.user}  (ID: {self.user.id})")
+
+
+async def main() -> None:
+    async with Bot() as bot:
+        await bot.start(os.environ["BOT_TOKEN"])
+
+
+asyncio.run(main())

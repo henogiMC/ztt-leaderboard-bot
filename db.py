@@ -1,108 +1,99 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Dict, List, Optional
+import logging
+import os
+import time
+from typing import Optional
 
 import asyncpg
 
+log = logging.getLogger(__name__)
+
+# ── Tier → points map ────────────────────────────────────────────────────────
+TIER_POINTS: dict[str, int] = {
+    "HT1": 60,
+    "LT1": 45,
+    "HT2": 30,
+    "LT2": 20,
+    "HT3": 10,
+    "LT3": 6,
+    "HT4": 4,
+    "LT4": 3,
+    "HT5": 2,
+    "LT5": 1,
+}
+
+# ── Internal state ────────────────────────────────────────────────────────────
 _pool: Optional[asyncpg.Pool] = None
-_GAMEMODE: str = "Mace"
-_TIER_UNRANKED: str = "Unranked"
+_cache: Optional[list[dict]] = None
+_cache_time: float = 0.0
+_CACHE_TTL: float = 3600.0  # seconds — matches the hourly refresh loop
 
 
-@dataclass
-class PlayerEntry:
-    discord_id: str
-    ign: str
-    tier: str
-    is_retired: bool
-
-
-async def init_db(database_url: str, gamemode: str, tier_unranked: str) -> None:
-    global _pool, _GAMEMODE, _TIER_UNRANKED
-    _GAMEMODE = gamemode
-    _TIER_UNRANKED = tier_unranked
-    _pool = await asyncpg.create_pool(database_url)
+# ── Initialisation ────────────────────────────────────────────────────────────
+async def init_pool() -> None:
+    """Create the asyncpg connection pool. Call once at bot startup."""
+    global _pool
+    _pool = await asyncpg.create_pool(os.environ["DATABASE_URL"])
 
 
 def _get_pool() -> asyncpg.Pool:
     if _pool is None:
-        raise RuntimeError("Database pool not initialized. Call init_db first.")
+        raise RuntimeError("Database pool not initialised — call init_pool() first.")
     return _pool
 
 
-async def get_all_players_for_gamemode(include_retired: bool) -> List[PlayerEntry]:
+# ── Public API ────────────────────────────────────────────────────────────────
+async def fetch_leaderboard(
+    gamemode: str,
+    tier_unranked: str,
+    *,
+    force: bool = False,
+) -> list[dict]:
     """
-    Fetch all players for the configured gamemode, optionally including retired players.
-    - Non-unranked players from `players` table.
-    - Active retirements from `retirements` table (if include_retired).
+    Return a sorted list of ranked players for *gamemode*.
+
+    Each entry is::
+
+        {
+            "discord_id": str,
+            "ign":        str,
+            "tier":       str,   # e.g. "HT1"
+            "points":     int,
+        }
+
+    Results are cached for CACHE_TTL seconds.  Pass ``force=True`` to bypass
+    the cache and hit the database immediately (used by the hourly task loop).
     """
-    pool = _get_pool()
-    gamemode = _GAMEMODE
-    tier_unranked = _TIER_UNRANKED
+    global _cache, _cache_time
 
-    players: Dict[str, PlayerEntry] = {}
+    now = time.monotonic()
+    if not force and _cache is not None and (now - _cache_time) < _CACHE_TTL:
+        return _cache
 
-    # Fetch non-unranked players for this gamemode
-    # Column name is quoted because it may contain spaces.
-    async with pool.acquire() as conn:
+    async with _get_pool().acquire() as conn:
         rows = await conn.fetch(
-            f"""
-            SELECT discord_id, ign, "{gamemode}" AS tier
-            FROM players
-            WHERE "{gamemode}" IS NOT NULL
-              AND "{gamemode}" != $1
-            """,
+            # Column names are double-quoted because gamemode names may contain spaces.
+            f'SELECT discord_id, ign, "{gamemode}" AS tier '
+            f"FROM players "
+            f'WHERE "{gamemode}" IS NOT NULL AND "{gamemode}" != $1',
             tier_unranked,
         )
 
+    players: list[dict] = []
     for row in rows:
-        discord_id = row["discord_id"]
-        ign = row["ign"]
-        tier = row["tier"]
-        if not tier or tier == tier_unranked:
-            continue
-        players[discord_id] = PlayerEntry(
-            discord_id=discord_id,
-            ign=ign,
-            tier=tier,
-            is_retired=False,
-        )
+        points = TIER_POINTS.get(row["tier"], 0)
+        if points > 0:
+            players.append(
+                {
+                    "discord_id": row["discord_id"],
+                    "ign": row["ign"],
+                    "tier": row["tier"],
+                    "points": points,
+                }
+            )
 
-    if not include_retired:
-        return list(players.values())
+    # Primary sort: points descending; secondary: discord_id for a stable order.
+    players.sort(key=lambda p: (-p["points"], p["discord_id"]))
 
-    # Fetch active retirements for this gamemode and join with players to get ign
-    async with pool.acquire() as conn:
-        rows_retired = await conn.fetch(
-            """
-            SELECT r.discord_id, r.tier, p.ign
-            FROM retirements r
-            JOIN players p ON p.discord_id = r.discord_id
-            WHERE r.gamemode = $1
-              AND r.unretired_at IS NULL
-            """,
-            gamemode,
-        )
-
-    for row in rows_retired:
-        discord_id = row["discord_id"]
-        ign = row["ign"]
-        tier = row["tier"]
-
-        # Normalize tier: if it already starts with "Retired ", strip it for scoring
-        # but we keep is_retired=True and will add "Retired " in display.
-        if isinstance(tier, str) and tier.startswith("Retired "):
-            base_tier = tier[len("Retired ") :]
-        else:
-            base_tier = tier
-
-        # If player already exists as non-retired, retired takes precedence when SHOW_RETIRED_PLAYERS is true.
-        players[discord_id] = PlayerEntry(
-            discord_id=discord_id,
-            ign=ign,
-            tier=base_tier,
-            is_retired=True,
-        )
-
-    return list(players.values())
+    _cache = players
+    _cache_time = now
+    return players
