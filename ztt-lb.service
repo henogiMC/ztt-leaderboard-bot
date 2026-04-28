@@ -1,0 +1,21 @@
+[Unit]
+Description=Zeqa Tier Testing Leaderboard Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/opt/ztt-leaderboard-bot-[gamemode]/
+EnvironmentFile=/etc/gamemode-helper-bots/env
+ExecStart=/opt/ztt-bot/.venv/bin/python main.py
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+StartLimitIntervalSec=120
+StartLimitBurst=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
