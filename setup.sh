@@ -23,7 +23,17 @@ if [[ "$DB_PASS" != "$DB_PASS_CONFIRM" ]]; then
   exit 1
 fi
 
+read -p "Enter target guild ID: " GUILDID
+read -p "Enter target leaderboard channel ID: " CHANNELID
+read -p "Enter leaderboard emoji name: " EMOJINAME
+read -p "Enter leaderboard emoji ID: " EMOJIID
 read -p "Enter gamemode for Bot: " GAMEMODE
+read -p "Show retired players (true/false) " BOOL
+
+if [["$BOOL" != "true" && "$BOOL" != "false" ]]; then
+    echo "Invalid input."
+    exit 1
+fi
 
 # Variables
 REPO_URL="http://192.168.178.217/felix/ztt-bot-full"
@@ -51,7 +61,7 @@ mv ztt-leaderboard-bot/*.py $INSTALL_DIR
 mv ztt-leaderboard-bot/cogs/ $INSTALL_DIR
 
 echo "Installing systemd service file from repository..."
-mv ztt-bot.service "$SERVICE_FILE"
+mv ztt-lb.service "$SERVICE_FILE"
 
 rm -rf ztt-leaderboard-bot/
 
@@ -71,6 +81,18 @@ DATABASE_URL=postgresql://ztt-bot:$DB_PASS@127.0.0.1:5432/ztt
 BOT_TOKEN=$TOKEN
 EOF
 
+tee "$INSTALL_DIR/config.json" >/dev/null <<EOF
+{
+  "GUILD_ID": $GUILDID,
+  "LEADERBOARD_CHANNEL_ID": $CHANNELID,
+  "LEADERBOARD_EMOJI_NAME": "$EMOJINAME",
+  "LEADERBOARD_EMOJI_ID": $EMOJIID,
+  "GAMEMODE": "$GAMEMODE",
+  "TIER_UNRANKED": "Unranked",
+  "SHOW_RETIRED_PLAYERS": $BOOL
+}
+
+
 echo "Setting permissions on application directory and env file..."
 chown -R "botuser:botuser" "$INSTALL_DIR"
 find "$INSTALL_DIR" -type d -exec chmod 755 {} +
@@ -80,7 +102,7 @@ chmod 600 "$ENV_DIR/env"
 
 echo "Reloading systemd, enabling and starting service..."
 systemctl daemon-reload
-systemctl enable --now ztt-bot.service
+systemctl enable --now ztt-lb.service
 
 echo "Service status:"
-systemctl status ztt-bot.service --no-pager
+systemctl status ztt-lb.service --no-pager
