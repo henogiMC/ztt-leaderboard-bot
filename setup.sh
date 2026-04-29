@@ -109,7 +109,8 @@ tee "$INSTALL_DIR/config.json" >/dev/null <<EOF
   "LEADERBOARD_EMOJI_NAME": "$EMOJINAME",
   "LEADERBOARD_EMOJI_ID": $EMOJIID,
   "GAMEMODE": "$GAMEMODE",
-  "TIER_UNRANKED": "Unranked"
+  "TIER_UNRANKED": "Unranked",
+  "SHOW_FOREIGN_PLAYERS": false
 }
 EOF
 

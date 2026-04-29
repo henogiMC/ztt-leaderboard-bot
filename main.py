@@ -44,9 +44,13 @@ with open("config.json") as _f:
 
 class Bot(commands.Bot):
     def __init__(self) -> None:
+        intents = discord.Intents.default()
+        intents.members = (
+            True  # needed to resolve guild membership for SHOW_FOREIGN_PLAYERS
+        )
         super().__init__(
             command_prefix=commands.when_mentioned,
-            intents=discord.Intents.default(),
+            intents=intents,
         )
 
     async def setup_hook(self) -> None:

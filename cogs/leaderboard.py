@@ -8,12 +8,19 @@ from discord.ext import commands, tasks
 from db import fetch_leaderboard
 from embed import build_leaderboard_embed, build_page_embed
 
+log = logging.getLogger(__name__)
+
 with open("config.json") as _f:
     _cfg = json.load(_f)
 
 _PAGE_SIZE = 10
 
-log = logging.getLogger(__name__)
+
+def _filter_players(players: list[dict], guild: discord.Guild) -> list[dict]:
+    """If SHOW_FOREIGN_PLAYERS is False, remove players not in the guild."""
+    if _cfg.get("SHOW_FOREIGN_PLAYERS", True):
+        return players
+    return [p for p in players if guild.get_member(int(p["discord_id"])) is not None]
 
 
 # ── Paginated view ────────────────────────────────────────────────────────────
@@ -60,10 +67,17 @@ class LeaderboardCog(commands.Cog):
     # ── Hourly task ───────────────────────────────────────────────────────────
     @tasks.loop(hours=1)
     async def update_leaderboard(self) -> None:
+        guild = self.bot.get_guild(_cfg["GUILD_ID"])
+        if guild is None:
+            print("Guild not found — check GUILD_ID.")
+            return
+
         players = await fetch_leaderboard(
             _cfg["GAMEMODE"], _cfg["TIER_UNRANKED"], force=True
         )
-        channel = self.bot.get_channel(_cfg["LEADERBOARD_CHANNEL_ID"])
+        players = _filter_players(players, guild)
+
+        channel = guild.get_channel(_cfg["LEADERBOARD_CHANNEL_ID"])
         if channel is None:
             print("Leaderboard channel not found — check LEADERBOARD_CHANNEL_ID.")
             return
@@ -99,6 +113,7 @@ class LeaderboardCog(commands.Cog):
     @app_commands.guilds(discord.Object(id=_cfg["GUILD_ID"]))
     async def leaderboard_cmd(self, interaction: discord.Interaction) -> None:
         players = await fetch_leaderboard(_cfg["GAMEMODE"], _cfg["TIER_UNRANKED"])
+        players = _filter_players(players, interaction.guild)
         await interaction.response.send_message(
             embed=build_page_embed(players, page=0),
             view=LeaderboardView(players),
